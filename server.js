@@ -98,13 +98,11 @@ wss.on('connection', (ws) => {
             const data = JSON.parse(message);
             if (data.type === 'input') {
                 player.input = {
-                    w: !!data.w,
-                    a: !!data.a,
-                    s: !!data.s,
-                    d: !!data.d,
+                    moveX: Number(data.moveX) || 0,
+                    moveZ: Number(data.moveZ) || 0,
                     jump: !!data.jump,
                     shoot: !!data.shoot,
-                    yaw: data.yaw || 0
+                    yaw: Number(data.yaw) || 0
                 };
             }
         } catch (e) {
@@ -134,14 +132,11 @@ setInterval(() => {
     for (const [ws, p] of players) {
         p.yaw = p.input.yaw;
 
-        // 이동 벡터 계산
-        let moveX = 0;
-        let moveZ = 0;
+        const moveX = p.input.moveX;
+        const moveZ = p.input.moveZ;
 
-        if (p.input.w) moveZ -= 1;
-        if (p.input.s) moveZ += 1;
-        if (p.input.a) moveX -= 1;
-        if (p.input.d) moveX += 1;
+        p.x += moveX * PLAYER_SPEED * DT;
+        p.z += moveZ * PLAYER_SPEED * DT;
 
         // 대각선 이동 속도 정규화
         const len = Math.hypot(moveX, moveZ);

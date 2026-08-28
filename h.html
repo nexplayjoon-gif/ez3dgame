@@ -264,25 +264,39 @@
 
         function sendInput() {
 
-            if (socket.readyState !== WebSocket.OPEN) {
-                return;
+            let inputX = 0;
+            let inputZ = 0;
+
+            if (INPUT.isDown("KeyW")) inputZ += 1;
+            if (INPUT.isDown("KeyS")) inputZ -= 1;
+            if (INPUT.isDown("KeyA")) inputX -= 1;
+            if (INPUT.isDown("KeyD")) inputX += 1;
+
+            const length = Math.hypot(inputX, inputZ);
+
+            if (length > 0) {
+                inputX /= length;
+                inputZ /= length;
             }
 
-            socket.send(JSON.stringify({
+            // 플레이어가 바라보는 방향을 기준으로 회전
+            const moveX =
+                inputX * Math.cos(yaw) -
+                inputZ * Math.sin(yaw);
 
+            const moveZ =
+                inputX * Math.sin(yaw) +
+                inputZ * Math.cos(yaw);
+
+            socket.send(JSON.stringify({
                 type: "input",
 
-                w: INPUT.isDown("KeyS"),
-                a: INPUT.isDown("KeyD"),
-                s: INPUT.isDown("KeyW"),
-                d: INPUT.isDown("KeyA"),
+                moveX: moveX,
+                moveZ: moveZ,
 
                 jump: jumpRequested,
-
                 shoot: INPUT.isDown("KeyE"),
-
-                yaw
-
+                yaw: yaw
             }));
 
             jumpRequested = false;
