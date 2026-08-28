@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>EZ3D Online</title>
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+        }
+
+        #hud {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            color: white;
+            z-index: 10;
+            user-select: none;
+            line-height: 1.6;
+        }
+
+        #leaderboard {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            width: 220px;
+            padding: 12px;
+            background: rgba(0, 0, 0, .6);
+            color: white;
+            border-radius: 8px;
+            z-index: 10;
+        }
+
+        #scores {
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        #crosshair {
+            position: fixed;
+            left: 50%;
+            top: 50%;
+            width: 12px;
+            height: 12px;
+            margin-left: -6px;
+            margin-top: -6px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #crosshair::before,
+        #crosshair::after {
+            content: "";
+            position: absolute;
+            background: white;
+        }
+
+        #crosshair::before {
+            width: 12px;
+            height: 2px;
+            left: 0;
+            top: 5px;
+        }
+
+        #crosshair::after {
+            width: 2px;
+            height: 12px;
+            left: 5px;
+            top: 0;
+        }
+
+        #status {
+            color: #8ff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="hud">
+        <div id="status">서버 연결 중...</div>
+        <div id="hp">HP: 100</div>
+        <div id="score">K: 0 / D: 0</div>
+        <div>WASD 이동 · SPACE 점프 · E 연사</div>
+    </div>
+
+    <div id="leaderboard">
+        <b>LEADERBOARD</b>
+        <div id="scores"></div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <script type="module">
+
+        import {
+            WORLD,
+            GEO,
+            LIGHT,
+            INPUT,
+            TIME
+        } from './ez3d.js';
+
+        // ============================================================
+        // 초기화
+        // ============================================================
+
+        WORLD.init();
+        INPUT.init();
+
+
+        // ============================================================
+        // 맵
+        // ============================================================
+
+        const ground = GEO.make(
+            "ground",
+            0,
+            0,
+            0,
+            false,
+            0x555555
+        );
+
+        // EZ3D 기본 ground = 20x20
+        // 2배로 확대해서 40x40 필드
+        ground.scale.set(2, 2, 2);
+
+
+        // 조명
+        LIGHT.ambient(0.5);
+
+        LIGHT.sun(
+            1.2,
+            8,
+            12,
+            6,
+            0xfff4e0
+        );
+
+
+        // ============================================================
+        // WebSocket
+        // ============================================================
+
+        const socket = new WebSocket(
+            `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`
+        );
+
+        let myId = null;
+
+        const players = new Map();
+
+
+        // ============================================================
+        // 플레이어
+        // ============================================================
+
+        function createPlayer(id) {
+
+            const mesh = GEO.make(
+                "cube",
+                0,
+                0.5,
+                0,
+                true,
+                0x3388ff
+            );
+
+            mesh.scale.set(1, 1, 1);
+
+            return {
+                id,
+                mesh
+            };
+        }
+
+
+        // ============================================================
+        // 총알 시각 효과
+        // ============================================================
+
+        const bullets = [];
+
+        function createBullet(player) {
+
+            const mesh = GEO.make(
+                "cube",
+                player.mesh.position.x,
+                player.mesh.position.y,
+                player.mesh.position.z,
+                false,
+                0xffff00
+            );
+
+            mesh.scale.set(
+                0.08,
+                0.08,
+                1
+            );
+
+            mesh.rotation.y = player.yaw;
+
+            bullets.push({
+                mesh,
+
+                x: player.mesh.position.x,
+                y: player.mesh.position.y,
+                z: player.mesh.position.z,
+
+                yaw: player.yaw,
+
+                life: 1.0
+            });
+        }
+
+
+        // ============================================================
+        // 마우스 시점
+        // ============================================================
+
+        let yaw = 0;
+        let pitch = 0;
+
+        document.body.addEventListener("click", () => {
+            document.body.requestPointerLock();
+        });
+
+        document.addEventListener("mousemove", e => {
+
+            if (document.pointerLockElement !== document.body) {
+                return;
+            }
+
+            yaw -= e.movementX * 0.002;
+            pitch -= e.movementY * 0.002;
+
+            pitch = Math.max(
+                -1.3,
+                Math.min(1.3, pitch)
+            );
+        });
+
+
+        // ============================================================
+        // 서버 입력 전송
+        // ============================================================
+
+        let jumpRequested = false;
+
+        window.addEventListener("keydown", e => {
+
+            if (e.code === "Space") {
+                jumpRequested = true;
+            }
+
+        });
+
+        function sendInput() {
+
+            if (socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            socket.send(JSON.stringify({
+
+                type: "input",
+
+                w: INPUT.isDown("KeyS"),
+                a: INPUT.isDown("KeyD"),
+                s: INPUT.isDown("KeyW"),
+                d: INPUT.isDown("KeyA"),
+
+                jump: jumpRequested,
+
+                shoot: INPUT.isDown("KeyE"),
+
+                yaw
+
+            }));
+
+            jumpRequested = false;
+        }
+
+
+        // ============================================================
+        // 연사
+        // ============================================================
+
+        let shootTimer = 0;
+
+        function updateShooting() {
+
+            if (!INPUT.isDown("KeyE")) {
+                shootTimer = 0;
+                return;
+            }
+
+            shootTimer -= TIME.delta;
+
+            if (shootTimer <= 0) {
+
+                shootTimer = 0.08;
+
+                const me = players.get(myId);
+
+                if (me) {
+                    me.yaw = yaw;
+                    createBullet(me);
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 총알 애니메이션
+        // ============================================================
+
+        function updateBullets() {
+
+            for (let i = bullets.length - 1; i >= 0; i--) {
+
+                const bullet = bullets[i];
+
+                const speed = 45;
+
+                bullet.x += Math.sin(bullet.yaw)
+                    * speed
+                    * TIME.delta;
+
+                bullet.z += Math.cos(bullet.yaw)
+                    * speed
+                    * TIME.delta;
+
+                bullet.life -= TIME.delta;
+
+                bullet.mesh.position.set(
+                    bullet.x,
+                    bullet.y,
+                    bullet.z
+                );
+
+                if (bullet.life <= 0) {
+
+                    GEO.remove(bullet.mesh);
+
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 서버 메시지
+        // ============================================================
+
+        socket.addEventListener("open", () => {
+
+            document.getElementById("status").textContent =
+                "ONLINE";
+
+        });
+
+
+        socket.addEventListener("close", () => {
+
+            document.getElementById("status").textContent =
+                "DISCONNECTED";
+
+        });
+
+
+        socket.addEventListener("message", event => {
+
+            const data = JSON.parse(event.data);
+
+
+            // 내 ID
+            if (data.type === "welcome") {
+
+                myId = data.id;
+
+                return;
+            }
+
+
+            // 플레이어 상태
+            if (data.type === "state") {
+
+                updatePlayers(data.players);
+
+                return;
+            }
+
+
+            // 리더보드
+            if (data.type === "leaderboard") {
+
+                updateLeaderboard(data.leaderboard);
+
+                return;
+            }
+
+        });
+
+
+        // ============================================================
+        // 플레이어 동기화
+        // ============================================================
+
+        function updatePlayers(list) {
+
+            const alive = new Set();
+
+            for (const p of list) {
+
+                alive.add(p.id);
+
+                let player = players.get(p.id);
+
+                if (!player) {
+
+                    player = createPlayer(p.id);
+
+                    players.set(
+                        p.id,
+                        player
+                    );
+                }
+
+
+                player.mesh.position.set(
+                    p.x,
+                    p.y,
+                    p.z
+                );
+
+                player.mesh.rotation.y =
+                    p.yaw;
+
+
+                if (p.id === myId) {
+
+                    player.yaw = yaw;
+
+                    document.getElementById("hp").textContent =
+                        `HP: ${p.hp}`;
+
+                    document.getElementById("score").textContent =
+                        `K: ${p.kills} / D: ${p.deaths}`;
+
+
+                    // 3인칭 카메라
+                    const distance = 8;
+
+                    const camX =
+                        p.x -
+                        Math.sin(yaw) * distance;
+
+                    const camZ =
+                        p.z -
+                        Math.cos(yaw) * distance;
+
+                    const camY =
+                        p.y + 4 + pitch * 2;
+
+
+                    WORLD.camera.position.set(
+                        camX,
+                        camY,
+                        camZ
+                    );
+
+                    WORLD.camera.lookAt(
+                        p.x,
+                        p.y + 0.5,
+                        p.z
+                    );
+                }
+            }
+
+
+            // 나간 플레이어 삭제
+            for (const [id, player] of players) {
+
+                if (!alive.has(id)) {
+
+                    GEO.remove(
+                        player.mesh
+                    );
+
+                    players.delete(id);
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 리더보드
+        // ============================================================
+
+        function updateLeaderboard(list) {
+
+            const element =
+                document.getElementById("scores");
+
+            element.innerHTML = "";
+
+            for (let i = 0; i < list.length; i++) {
+
+                const p = list[i];
+
+                const row =
+                    document.createElement("div");
+
+                const name =
+                    p.id === myId
+                        ? `${p.id} (YOU)`
+                        : p.id;
+
+                row.textContent =
+                    `${i + 1}. ${name} — ${p.kills} K`;
+
+                element.appendChild(row);
+            }
+        }
+
+
+        // ============================================================
+        // 게임 루프
+        // ============================================================
+
+        WORLD.animate(() => {
+
+            sendInput();
+
+            updateShooting();
+
+            updateBullets();
+
+        });
+
+    </script>
+
+</body>
+
+</html>
