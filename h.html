@@ -179,6 +179,9 @@
         // 서버 총알 (상대방이 쏜 것)
         const bulletMeshMap = new Map();
 
+        // 폭발 파티클
+        const explosions = [];
+
 
         // ============================================================
         // 플레이어
@@ -202,8 +205,93 @@
                 id,
                 mesh,
                 target: { x: 0, y: 0.5, z: 0 },
-                targetYaw: 0
+                targetYaw: 0,
+                isDead: false  // 죽음 상태 플래그
             };
+        }
+
+
+        // ============================================================
+        // ✨ 폭발 이펙트
+        // ============================================================
+
+        function createExplosion(x, y, z, count = 30) {
+            const particles = [];
+            const colors = [0xff4400, 0xff8800, 0xffcc00, 0xff2200];
+
+            for (let i = 0; i < count; i++) {
+                const size = 0.05 + Math.random() * 0.15;
+                const mesh = GEO.make(
+                    "sphere",
+                    x + (Math.random() - 0.5) * 0.3,
+                    y + (Math.random() - 0.5) * 0.3,
+                    z + (Math.random() - 0.5) * 0.3,
+                    false,
+                    colors[Math.floor(Math.random() * colors.length)]
+                );
+                mesh.scale.set(size, size, size);
+
+                const speed = 3 + Math.random() * 7;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+
+                particles.push({
+                    mesh,
+                    vx: Math.sin(theta) * Math.cos(phi) * speed,
+                    vy: Math.sin(phi) * speed * 0.5 + 2,
+                    vz: Math.cos(theta) * Math.cos(phi) * speed,
+                    life: 0.5 + Math.random() * 0.8,
+                    maxLife: 0.5 + Math.random() * 0.8
+                });
+            }
+
+            explosions.push({
+                particles,
+                active: true
+            });
+        }
+
+
+        // ============================================================
+        // ✨ 폭발 업데이트
+        // ============================================================
+
+        function updateExplosions(dt) {
+            for (let e = explosions.length - 1; e >= 0; e--) {
+                const exp = explosions[e];
+                let allDead = true;
+
+                for (let i = exp.particles.length - 1; i >= 0; i--) {
+                    const p = exp.particles[i];
+                    p.life -= dt;
+
+                    if (p.life <= 0) {
+                        GEO.remove(p.mesh);
+                        exp.particles.splice(i, 1);
+                        continue;
+                    }
+
+                    allDead = false;
+
+                    // 중력 적용
+                    p.vy -= 15 * dt;
+                    p.mesh.position.x += p.vx * dt;
+                    p.mesh.position.y += p.vy * dt;
+                    p.mesh.position.z += p.vz * dt;
+
+                    // 크기 서서히 줄어들기
+                    const scale = (p.life / p.maxLife) * 0.3;
+                    p.mesh.scale.set(scale, scale, scale);
+
+                    // 회전
+                    p.mesh.rotation.x += dt * 5;
+                    p.mesh.rotation.y += dt * 3;
+                }
+
+                if (allDead || exp.particles.length === 0) {
+                    explosions.splice(e, 1);
+                }
+            }
         }
 
 
@@ -439,6 +527,21 @@
                 }
 
                 if (p.id === myId) {
+                    // 내 HP가 0이면 죽음 처리
+                    if (p.hp <= 0 && !player.isDead) {
+                        player.isDead = true;
+                        // 폭발 이펙트 생성
+                        createExplosion(p.x, p.y, p.z, 40);
+                        // 캐릭터 메쉬 숨기기
+                        player.mesh.visible = false;
+                    }
+
+                    // 부활 처리 (HP가 100으로 회복되면)
+                    if (p.hp > 0 && player.isDead) {
+                        player.isDead = false;
+                        player.mesh.visible = true;
+                    }
+
                     if (!predicted) {
                         predicted = {
                             x: p.x,
@@ -472,6 +575,18 @@
                     document.getElementById("hp").textContent = `HP: ${p.hp}`;
                     document.getElementById("score").textContent = `K: ${p.kills} / D: ${p.deaths}`;
                 } else {
+                    // 상대방이 죽었는지 확인
+                    if (p.hp <= 0 && !player.isDead) {
+                        player.isDead = true;
+                        createExplosion(p.x, p.y, p.z, 30);
+                        player.mesh.visible = false;
+                    }
+
+                    if (p.hp > 0 && player.isDead) {
+                        player.isDead = false;
+                        player.mesh.visible = true;
+                    }
+
                     player.target.x = p.x;
                     player.target.y = p.y;
                     player.target.z = p.z;
@@ -515,11 +630,14 @@
             const me = players.get(myId);
             if (!me) return;
 
-            me.mesh.position.set(
-                predicted.x,
-                predicted.y,
-                predicted.z
-            );
+            // 죽었으면 위치 업데이트 안 함 (폭발 파티클이 대신 표시)
+            if (!me.isDead) {
+                me.mesh.position.set(
+                    predicted.x,
+                    predicted.y,
+                    predicted.z
+                );
+            }
 
             me.mesh.rotation.y = yaw;
             me.yaw = yaw;
@@ -540,9 +658,12 @@
             for (const [id, player] of players) {
                 if (id === myId) continue;
 
-                player.mesh.position.x += (player.target.x - player.mesh.position.x) * lerpFactor;
-                player.mesh.position.y += (player.target.y - player.mesh.position.y) * lerpFactor;
-                player.mesh.position.z += (player.target.z - player.mesh.position.z) * lerpFactor;
+                // 죽었으면 위치 업데이트 안 함
+                if (!player.isDead) {
+                    player.mesh.position.x += (player.target.x - player.mesh.position.x) * lerpFactor;
+                    player.mesh.position.y += (player.target.y - player.mesh.position.y) * lerpFactor;
+                    player.mesh.position.z += (player.target.z - player.mesh.position.z) * lerpFactor;
+                }
 
                 player.mesh.rotation.y = player.targetYaw;
             }
@@ -576,7 +697,8 @@
         WORLD.animate((dt) => {
             updateLocalPrediction(dt);
             updateRemoteInterpolation(dt);
-            updateLocalBullets(dt);  // ← 로컬 총알 업데이트
+            updateLocalBullets(dt);
+            updateExplosions(dt);  // ← 폭발 이펙트 업데이트
         });
 
     </script>
