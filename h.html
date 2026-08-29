@@ -107,6 +107,8 @@
             TIME
         } from './ez3d.js';
 
+        import { PHYSICS, stepPlayer } from './physics.js';
+
         // ============================================================
         // 초기화
         // ============================================================
@@ -157,6 +159,13 @@
 
         const players = new Map();
 
+        // 내 캐릭터의 "예측" 상태 — 서버 응답을 기다리지 않고
+        // 매 프레임 로컬에서 먼저 이동시켜서 화면에 반영하는 값.
+        // 서버 state가 도착하면 이 값을 서버 값과 비교해서 보정한다.
+        let predicted = null;
+        const RECONCILE_SNAP_DIST = 2.0; // 이 이상 어긋나면 순간 보정(스냅)
+        const RECONCILE_SMOOTH = 0.2;    // 작은 오차는 이 비율로 서서히 보정
+
 
         // ============================================================
         // 플레이어
@@ -177,7 +186,9 @@
 
             return {
                 id,
-                mesh
+                mesh,
+                target: { x: 0, y: 0.5, z: 0 }, // 서버가 준 최신 목표 위치
+                targetYaw: 0
             };
         }
 
@@ -262,12 +273,7 @@
 
         });
 
-        function sendInput() {
-            if (socket.readyState !== WebSocket.OPEN) {
-                jumpRequested = false;
-                return;
-            }
-
+        function computeInput() {
             let inputX = 0;
             let inputZ = 0;
 
@@ -282,6 +288,10 @@
                 inputX /= length;
                 inputZ /= length;
             }
+
+            // 전방 = (sin(yaw), cos(yaw))  ← 총알/카메라와 동일한 기준
+            // 오른쪽 = (-cos(yaw), sin(yaw))
+            // W(전진)는 전방 벡터, D(오른쪽)는 오른쪽 벡터를 따라가도록 합성
             const moveX =
                 inputZ * Math.sin(yaw) -
                 inputX * Math.cos(yaw);
@@ -290,16 +300,28 @@
                 inputZ * Math.cos(yaw) +
                 inputX * Math.sin(yaw);
 
-            socket.send(JSON.stringify({
-                type: "input",
+            const input = {
                 moveX,
                 moveZ,
                 jump: jumpRequested,
                 shoot: INPUT.isDown("KeyE"),
                 yaw
-            }));
+            };
 
             jumpRequested = false;
+
+            return input;
+        }
+
+        function sendInput(input) {
+            if (socket.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            socket.send(JSON.stringify({
+                type: "input",
+                ...input
+            }));
         }
 
 
@@ -449,17 +471,45 @@
                 }
 
 
-                player.mesh.position.set(
-                    p.x,
-                    p.y,
-                    p.z
-                );
-
-                player.mesh.rotation.y =
-                    p.yaw;
-
-
                 if (p.id === myId) {
+
+                    // ------------------------------------------------
+                    // 내 캐릭터: 예측(predicted)이 아직 없으면 서버 값으로 초기화.
+                    // 있으면 즉시 스냅하지 않고 서버 값과의 오차만큼만 보정한다.
+                    // (너무 자주/세게 보정하면 예측한 의미가 없어짐)
+                    // ------------------------------------------------
+                    if (!predicted) {
+
+                        predicted = {
+                            x: p.x,
+                            y: p.y,
+                            z: p.z,
+                            vy: p.vy,
+                            isGrounded: p.isGrounded
+                        };
+
+                    } else {
+
+                        const dist = Math.hypot(
+                            p.x - predicted.x,
+                            p.z - predicted.z
+                        );
+
+                        if (dist > RECONCILE_SNAP_DIST) {
+                            // 오차가 너무 크면(피격 리스폰 등) 바로 스냅
+                            predicted.x = p.x;
+                            predicted.z = p.z;
+                        } else {
+                            // 오차가 작으면 서서히 당겨서 보정 (티 안 나게)
+                            predicted.x += (p.x - predicted.x) * RECONCILE_SMOOTH;
+                            predicted.z += (p.z - predicted.z) * RECONCILE_SMOOTH;
+                        }
+
+                        // 수직 이동(점프/중력)은 서버가 권위자이므로 그대로 따름
+                        predicted.y = p.y;
+                        predicted.vy = p.vy;
+                        predicted.isGrounded = p.isGrounded;
+                    }
 
                     player.yaw = yaw;
 
@@ -469,33 +519,16 @@
                     document.getElementById("score").textContent =
                         `K: ${p.kills} / D: ${p.deaths}`;
 
+                } else {
 
-                    // 3인칭 카메라
-                    const distance = 8;
-
-                    const camX =
-                        p.x -
-                        Math.sin(yaw) * distance;
-
-                    const camZ =
-                        p.z -
-                        Math.cos(yaw) * distance;
-
-                    const camY =
-                        p.y + 4 + pitch * 2;
-
-
-                    WORLD.camera.position.set(
-                        camX,
-                        camY,
-                        camZ
-                    );
-
-                    WORLD.camera.lookAt(
-                        p.x,
-                        p.y + 0.5,
-                        p.z
-                    );
+                    // ------------------------------------------------
+                    // 다른 플레이어: 위치를 바로 스냅하지 않고
+                    // target에 저장해서 매 프레임 부드럽게 따라가게 한다.
+                    // ------------------------------------------------
+                    player.target.x = p.x;
+                    player.target.y = p.y;
+                    player.target.z = p.z;
+                    player.targetYaw = p.yaw;
                 }
             }
 
@@ -511,6 +544,61 @@
 
                     players.delete(id);
                 }
+            }
+        }
+
+
+        // ============================================================
+        // 다른 플레이어 위치 보간 + 내 캐릭터 예측 이동/렌더링 (매 프레임)
+        // ============================================================
+
+        function updateLocalPrediction(dt) {
+
+            if (!predicted) return;
+
+            const input = computeInput();
+
+            sendInput(input);
+
+            stepPlayer(predicted, input, dt);
+
+            const me = players.get(myId);
+
+            if (!me) return;
+
+            me.mesh.position.set(
+                predicted.x,
+                predicted.y,
+                predicted.z
+            );
+
+            me.mesh.rotation.y = yaw;
+            me.yaw = yaw;
+
+            // 3인칭 카메라 (예측 위치를 즉시 따라가서 지연 없음)
+            const distance = 8;
+
+            const camX = predicted.x - Math.sin(yaw) * distance;
+            const camZ = predicted.z - Math.cos(yaw) * distance;
+            const camY = predicted.y + 4 + pitch * 2;
+
+            WORLD.camera.position.set(camX, camY, camZ);
+            WORLD.camera.lookAt(predicted.x, predicted.y + 0.5, predicted.z);
+        }
+
+        function updateRemoteInterpolation(dt) {
+
+            const lerpFactor = Math.min(1, dt * 12);
+
+            for (const [id, player] of players) {
+
+                if (id === myId) continue;
+
+                player.mesh.position.x += (player.target.x - player.mesh.position.x) * lerpFactor;
+                player.mesh.position.y += (player.target.y - player.mesh.position.y) * lerpFactor;
+                player.mesh.position.z += (player.target.z - player.mesh.position.z) * lerpFactor;
+
+                player.mesh.rotation.y = player.targetYaw;
             }
         }
 
@@ -550,9 +638,11 @@
         // 게임 루프
         // ============================================================
 
-        WORLD.animate(() => {
+        WORLD.animate((dt) => {
 
-            sendInput();
+            updateLocalPrediction(dt);
+
+            updateRemoteInterpolation(dt);
 
             updateShooting();
 

@@ -2,6 +2,7 @@ import { createServer } from 'http';
 import { readFileSync, existsSync } from 'fs';
 import { join, extname } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
+import { PHYSICS, stepPlayer } from './physics.js';
 
 const PORT = process.env.PORT || 3000;
 
@@ -36,11 +37,7 @@ const wss = new WebSocketServer({ server });
 const players = new Map();
 let nextPlayerId = 1;
 
-// 맵 및 물리 상수 설정
-const FIELD_BOUNDS = 19; // ground (40x40) 경계선값
-const PLAYER_SPEED = 10;
-const GRAVITY = -25;
-const JUMP_FORCE = 8;
+// 맵 및 사격 관련 상수 (이동/중력/점프는 physics.js의 PHYSICS 사용)
 const SHOOT_COOLDOWN = 0.08;
 const BULLET_SPEED = 45;
 const BULLET_HIT_RADIUS = 0.8;
@@ -133,31 +130,8 @@ setInterval(() => {
         p.yaw = p.input.yaw;
 
         // 클라이언트가 이미 yaw 기준으로 회전시킨 월드좌표 이동값을 보내므로
-        // 여기서는 그대로 한 번만 적용한다 (다시 회전시키면 이중 적용됨).
-        const moveX = p.input.moveX || 0;
-        const moveZ = p.input.moveZ || 0;
-
-        p.x += moveX * PLAYER_SPEED * DT;
-        p.z += moveZ * PLAYER_SPEED * DT;
-
-        // 필드 경계 제한
-        p.x = Math.max(-FIELD_BOUNDS, Math.min(FIELD_BOUNDS, p.x));
-        p.z = Math.max(-FIELD_BOUNDS, Math.min(FIELD_BOUNDS, p.z));
-
-        // 점프 및 중력
-        if (p.input.jump && p.isGrounded) {
-            p.vy = JUMP_FORCE;
-            p.isGrounded = false;
-        }
-
-        p.vy += GRAVITY * DT;
-        p.y += p.vy * DT;
-
-        if (p.y <= 0.5) {
-            p.y = 0.5;
-            p.vy = 0;
-            p.isGrounded = true;
-        }
+        // 여기서는 클라이언트와 동일한 stepPlayer()로 그대로 한 번만 적용한다.
+        stepPlayer(p, p.input, DT);
 
         // 사격 검사
         if (p.input.shoot && now - p.lastShootTime >= SHOOT_COOLDOWN) {
@@ -224,6 +198,8 @@ function broadcastState() {
         x: p.x,
         y: p.y,
         z: p.z,
+        vy: p.vy,
+        isGrounded: p.isGrounded,
         yaw: p.yaw,
         hp: p.hp,
         kills: p.kills,
