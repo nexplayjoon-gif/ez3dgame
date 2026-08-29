@@ -222,7 +222,14 @@ function broadcastState() {
 
     const payload = JSON.stringify({
         type: 'state',
-        players: playerList
+        players: playerList,
+        bullets: activeBullets.map(b => ({
+            ownerId: b.ownerId,
+            x: b.x,
+            y: b.y,
+            z: b.z,
+            yaw: b.yaw
+        }))
     });
 
     for (const client of wss.clients) {

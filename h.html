@@ -394,7 +394,38 @@
             }
         }
 
+        function updateServerBullets(serverBullets) {
 
+            // 서버가 현재 존재한다고 알려준 총알들
+            for (const b of serverBullets) {
+
+                // 내 총알은 이미 createBullet()로 표시하고 있으므로
+                // 중복 표시하지 않음
+                if (b.ownerId === myId) continue;
+
+                const mesh = GEO.make(
+                    "cube",
+                    b.x,
+                    b.y,
+                    b.z,
+                    false,
+                    0xffff00
+                );
+
+                mesh.scale.set(0.08, 0.08, 1);
+                mesh.rotation.y = b.yaw;
+
+                bullets.push({
+                    mesh,
+                    x: b.x,
+                    y: b.y,
+                    z: b.z,
+                    yaw: b.yaw,
+                    life: 0.1,
+                    serverBullet: true
+                });
+            }
+        }
         // ============================================================
         // 서버 메시지
         // ============================================================
@@ -445,7 +476,16 @@
 
                 return;
             }
+            if (data.type === "state") {
 
+                updatePlayers(data.players);
+
+                if (data.bullets) {
+                    updateServerBullets(data.bullets);
+                }
+
+                return;
+            }
         });
 
 

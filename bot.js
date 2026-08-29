@@ -126,8 +126,8 @@ function createBot(index) {
 
         // 사격을 켰다 껐다 (연사처럼 잠깐 유지)
         behaviorTimers.push(setInterval(() => {
-            shoot = Math.random() < 0.4;
-        }, 250 + Math.random() * 600));
+            shoot = Math.random() < 0.8;
+        }, 500 + Math.random() * 700));
 
         // 실제 입력 전송 (서버 tick과 동일한 60Hz)
         sendTimer = setInterval(() => {
