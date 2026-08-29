@@ -8,7 +8,7 @@
    ============================================================ */
 
 export const PHYSICS = {
-    SPEED: 10,
+    SPEED: 40,
     GRAVITY: -25,
     JUMP_FORCE: 8,
     BOUNDS: 19,     // 필드 경계 (40x40 맵 기준)
