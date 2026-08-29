@@ -132,7 +132,7 @@
 
         // EZ3D 기본 ground = 20x20
         // 2배로 확대해서 40x40 필드
-        ground.scale.set(10, 2, 10);
+        ground.scale.set(20, 2, 20);
 
 
         // 조명
@@ -490,7 +490,9 @@
                             y: p.y,
                             z: p.z,
                             vy: p.vy,
-                            isGrounded: p.isGrounded
+                            isGrounded: p.isGrounded,
+                            coyoteTimer: p.coyoteTimer || 0,
+                            jumpBufferTimer: p.jumpBufferTimer || 0
                         };
 
                     } else if (typeof p.lastProcessedSeq === 'number') {
@@ -506,6 +508,8 @@
                         predicted.z = p.z;
                         predicted.vy = p.vy;
                         predicted.isGrounded = p.isGrounded;
+                        predicted.coyoteTimer = p.coyoteTimer || 0;
+                        predicted.jumpBufferTimer = p.jumpBufferTimer || 0;
 
                         // 아직 서버가 처리 못한 입력들을 그 위에 다시 재생
                         for (const entry of inputHistory) {

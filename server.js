@@ -57,6 +57,8 @@ function spawnPlayer(id) {
         kills: 0,
         deaths: 0,
         isGrounded: true,
+        coyoteTimer: 0,
+        jumpBufferTimer: 0,
         lastShootTime: 0,
         lastProcessedSeq: 0,
         input: { moveX: 0, moveZ: 0, jump: false, shoot: false, yaw: 0 }
@@ -169,7 +171,12 @@ setInterval(() => {
                     p.deaths += 1;
                     p.hp = 100;
                     p.x = (Math.random() - 0.5) * 20;
+                    p.y = 0.5;
                     p.z = (Math.random() - 0.5) * 20;
+                    p.vy = 0;
+                    p.isGrounded = true;
+                    p.coyoteTimer = 0;
+                    p.jumpBufferTimer = 0;
 
                     // 킬러 점수 추가
                     for (const [kWs, shooter] of players) {
@@ -204,6 +211,8 @@ function broadcastState() {
         z: p.z,
         vy: p.vy,
         isGrounded: p.isGrounded,
+        coyoteTimer: p.coyoteTimer,
+        jumpBufferTimer: p.jumpBufferTimer,
         lastProcessedSeq: p.lastProcessedSeq,
         yaw: p.yaw,
         hp: p.hp,
