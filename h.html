@@ -169,6 +169,8 @@
         // ============================================================
 
         function createPlayer(id) {
+            // 내 캐릭터면 파란색(0x3388ff), 상대방이면 빨간색(0xff3333)
+            const color = (id === myId) ? 0x3388ff : 0xff3333;
 
             const mesh = GEO.make(
                 "cube",
@@ -176,7 +178,7 @@
                 0.5,
                 0,
                 true,
-                0x3388ff
+                color
             );
 
             mesh.scale.set(1, 1, 1);
@@ -199,28 +201,28 @@
         function updateServerBullets(serverBullets) {
             if (!serverBullets) return;
 
-            const activeIds = new Set(); // 이번 프레임에 생존한 총알 ID 목록
+            const activeIds = new Set();
 
             serverBullets.forEach(b => {
                 activeIds.add(b.id);
                 let mesh = bulletMeshMap.get(b.id);
 
                 if (!mesh) {
-                    // 처음 보는 총알이면 새로 생성 (노란색 작은 구)
-                    mesh = GEO.make("sphere", b.x, b.y, b.z, false, 0xffff00);
-                    mesh.scale.set(0.2, 0.2, 0.2); // 총알 크기 조절
+                    // 총알 주인(ownerId)이 나면 노란색, 상대방이면 빨간색
+                    const bulletColor = (b.ownerId === myId) ? 0xffff00 : 0xff0000;
+
+                    mesh = GEO.make("sphere", b.x, b.y, b.z, false, bulletColor);
+                    mesh.scale.set(0.2, 0.2, 0.2);
                     bulletMeshMap.set(b.id, mesh);
                 } else {
-                    // 기존 총알이면 서버가 알려준 최신 좌표로 위치 갱신
                     mesh.position.set(b.x, b.y, b.z);
                 }
             });
 
-            // 수명이 다해 서버에서 삭제된 총알을 클라이언트 화면에서도 제거
             for (const [id, mesh] of bulletMeshMap.entries()) {
                 if (!activeIds.has(id)) {
-                    GEO.remove(mesh);      // three.js 씬에서 제거
-                    bulletMeshMap.delete(id); // 맵에서도 삭제
+                    GEO.remove(mesh);
+                    bulletMeshMap.delete(id);
                 }
             }
         }
