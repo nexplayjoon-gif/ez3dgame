@@ -58,6 +58,7 @@ function spawnPlayer(id) {
         deaths: 0,
         isGrounded: true,
         lastShootTime: 0,
+        lastProcessedSeq: 0,
         input: { moveX: 0, moveZ: 0, jump: false, shoot: false, yaw: 0 }
     };
 }
@@ -101,6 +102,9 @@ wss.on('connection', (ws) => {
                     shoot: !!data.shoot,
                     yaw: Number(data.yaw) || 0
                 };
+                if (typeof data.seq === 'number') {
+                    player.lastProcessedSeq = data.seq;
+                }
             }
         } catch (e) {
             console.error('입력 파싱 에러:', e);
@@ -200,6 +204,7 @@ function broadcastState() {
         z: p.z,
         vy: p.vy,
         isGrounded: p.isGrounded,
+        lastProcessedSeq: p.lastProcessedSeq,
         yaw: p.yaw,
         hp: p.hp,
         kills: p.kills,
