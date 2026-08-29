@@ -107,7 +107,7 @@
             TIME
         } from './ez3d.js';
 
-        import { PHYSICS, stepPlayer } from './physics.js';
+        import { stepPlayer } from './physics.js';
 
         // ============================================================
         // 초기화
@@ -130,8 +130,6 @@
             0x555555
         );
 
-        // EZ3D 기본 ground = 20x20
-        // 2배로 확대해서 40x40 필드
         ground.scale.set(20, 20, 20);
 
         // 조명
@@ -158,14 +156,11 @@
 
         const players = new Map();
 
-        // 내 캐릭터의 "예측" 상태 — 서버 응답을 기다리지 않고
-        // 매 프레임 로컬에서 먼저 이동시켜서 화면에 반영하는 값.
-        // 서버 state가 도착하면, 서버가 "몇 번째 입력까지 처리했는지"(seq)를 보고
-        // 그 이후의(아직 서버가 반영 못한) 입력만 다시 재생해서 보정한다.
+        // 내 캐릭터의 예측 상태
         let predicted = null;
         let inputSeq = 0;
-        let inputHistory = []; // 서버가 아직 확인 안 해준 입력들 {seq, input}
-        const FIXED_DT = 1 / 60; // 서버 tick과 동일한 간격으로 맞춰야 재생이 정확함
+        let inputHistory = [];
+        const FIXED_DT = 1 / 60;
         let accumulator = 0;
 
 
@@ -189,48 +184,45 @@
             return {
                 id,
                 mesh,
-                target: { x: 0, y: 0.5, z: 0 }, // 서버가 준 최신 목표 위치
+                target: { x: 0, y: 0.5, z: 0 },
                 targetYaw: 0
             };
         }
 
 
         // ============================================================
-        // 총알 시각 효과
+        // ✨ 총알 관리 (요청하신 bulletMeshMap 연동 로직)
         // ============================================================
 
-        const bullets = [];
+        const bulletMeshMap = new Map(); // 총알 ID별 3D 오브젝트 저장소
 
-        function createBullet(player) {
+        function updateServerBullets(serverBullets) {
+            if (!serverBullets) return;
 
-            const mesh = GEO.make(
-                "cube",
-                player.mesh.position.x,
-                player.mesh.position.y,
-                player.mesh.position.z,
-                false,
-                0xffff00
-            );
+            const activeIds = new Set(); // 이번 프레임에 생존한 총알 ID 목록
 
-            mesh.scale.set(
-                0.08,
-                0.08,
-                1
-            );
+            serverBullets.forEach(b => {
+                activeIds.add(b.id);
+                let mesh = bulletMeshMap.get(b.id);
 
-            mesh.rotation.y = player.yaw;
-
-            bullets.push({
-                mesh,
-
-                x: player.mesh.position.x,
-                y: player.mesh.position.y,
-                z: player.mesh.position.z,
-
-                yaw: player.yaw,
-
-                life: 1.0
+                if (!mesh) {
+                    // 처음 보는 총알이면 새로 생성 (노란색 작은 구)
+                    mesh = GEO.make("sphere", b.x, b.y, b.z, false, 0xffff00);
+                    mesh.scale.set(0.2, 0.2, 0.2); // 총알 크기 조절
+                    bulletMeshMap.set(b.id, mesh);
+                } else {
+                    // 기존 총알이면 서버가 알려준 최신 좌표로 위치 갱신
+                    mesh.position.set(b.x, b.y, b.z);
+                }
             });
+
+            // 수명이 다해 서버에서 삭제된 총알을 클라이언트 화면에서도 제거
+            for (const [id, mesh] of bulletMeshMap.entries()) {
+                if (!activeIds.has(id)) {
+                    GEO.remove(mesh);      // three.js 씬에서 제거
+                    bulletMeshMap.delete(id); // 맵에서도 삭제
+                }
+            }
         }
 
 
@@ -291,9 +283,6 @@
                 inputZ /= length;
             }
 
-            // 전방 = (sin(yaw), cos(yaw))  ← 총알/카메라와 동일한 기준
-            // 오른쪽 = (-cos(yaw), sin(yaw))
-            // W(전진)는 전방 벡터, D(오른쪽)는 오른쪽 벡터를 따라가도록 합성
             const moveX =
                 inputZ * Math.sin(yaw) -
                 inputX * Math.cos(yaw);
@@ -329,161 +318,38 @@
 
 
         // ============================================================
-        // 연사
-        // ============================================================
-
-        let shootTimer = 0;
-
-        function updateShooting() {
-
-            if (!INPUT.isDown("KeyE")) {
-                shootTimer = 0;
-                return;
-            }
-
-            shootTimer -= TIME.delta;
-
-            if (shootTimer <= 0) {
-
-                shootTimer = 0.08;
-
-                const me = players.get(myId);
-
-                if (me) {
-                    me.yaw = yaw;
-                    createBullet(me);
-                }
-            }
-        }
-
-
-        // ============================================================
-        // 총알 애니메이션
-        // ============================================================
-
-        function updateBullets() {
-
-            for (let i = bullets.length - 1; i >= 0; i--) {
-
-                const bullet = bullets[i];
-
-                const speed = 45;
-
-                bullet.x += Math.sin(bullet.yaw)
-                    * speed
-                    * TIME.delta;
-
-                bullet.z += Math.cos(bullet.yaw)
-                    * speed
-                    * TIME.delta;
-
-                bullet.life -= TIME.delta;
-
-                bullet.mesh.position.set(
-                    bullet.x,
-                    bullet.y,
-                    bullet.z
-                );
-
-                if (bullet.life <= 0) {
-
-                    GEO.remove(bullet.mesh);
-
-                    bullets.splice(i, 1);
-                }
-            }
-        }
-
-        function updateServerBullets(serverBullets) {
-
-            // 서버가 현재 존재한다고 알려준 총알들
-            for (const b of serverBullets) {
-
-                // 내 총알은 이미 createBullet()로 표시하고 있으므로
-                // 중복 표시하지 않음
-                if (b.ownerId === myId) continue;
-
-                const mesh = GEO.make(
-                    "cube",
-                    b.x,
-                    b.y,
-                    b.z,
-                    false,
-                    0xffff00
-                );
-
-                mesh.scale.set(0.08, 0.08, 1);
-                mesh.rotation.y = b.yaw;
-
-                bullets.push({
-                    mesh,
-                    x: b.x,
-                    y: b.y,
-                    z: b.z,
-                    yaw: b.yaw,
-                    life: 0.1,
-                    serverBullet: true
-                });
-            }
-        }
-        // ============================================================
-        // 서버 메시지
+        // 서버 메시지 수신
         // ============================================================
 
         socket.addEventListener("open", () => {
-
-            document.getElementById("status").textContent =
-                "ONLINE";
-
+            document.getElementById("status").textContent = "ONLINE";
         });
-
 
         socket.addEventListener("close", () => {
-
-            document.getElementById("status").textContent =
-                "DISCONNECTED";
-
+            document.getElementById("status").textContent = "DISCONNECTED";
         });
-
 
         socket.addEventListener("message", event => {
 
             const data = JSON.parse(event.data);
 
-
-            // 내 ID
             if (data.type === "welcome") {
-
                 myId = data.id;
-
                 return;
             }
 
-
-            // 플레이어 상태
             if (data.type === "state") {
-
+                // 1. 플레이어 동기화
                 updatePlayers(data.players);
 
+                // 2. ✨ 총알 렌더링 동기화
+                updateServerBullets(data.bullets);
+
                 return;
             }
 
-
-            // 리더보드
             if (data.type === "leaderboard") {
-
                 updateLeaderboard(data.leaderboard);
-
-                return;
-            }
-            if (data.type === "state") {
-
-                updatePlayers(data.players);
-
-                if (data.bullets) {
-                    updateServerBullets(data.bullets);
-                }
-
                 return;
             }
         });
@@ -504,26 +370,13 @@
                 let player = players.get(p.id);
 
                 if (!player) {
-
                     player = createPlayer(p.id);
-
-                    players.set(
-                        p.id,
-                        player
-                    );
+                    players.set(p.id, player);
                 }
-
 
                 if (p.id === myId) {
 
-                    // ------------------------------------------------
-                    // 내 캐릭터: 예측(predicted)이 아직 없으면 서버 값으로 초기화.
-                    // 있으면 서버가 확인해준(lastProcessedSeq까지 반영된) 위치로
-                    // 되돌린 뒤, 서버가 아직 못 받은 입력들만 다시 재생해서
-                    // "지금" 위치로 재추적한다. → 뒤로 튀어 보이지 않음.
-                    // ------------------------------------------------
                     if (!predicted) {
-
                         predicted = {
                             x: p.x,
                             y: p.y,
@@ -536,12 +389,10 @@
 
                     } else if (typeof p.lastProcessedSeq === 'number') {
 
-                        // 서버가 이미 반영한 입력들은 히스토리에서 제거
                         inputHistory = inputHistory.filter(
                             entry => entry.seq > p.lastProcessedSeq
                         );
 
-                        // 서버가 확인해준 위치로 되돌리고
                         predicted.x = p.x;
                         predicted.y = p.y;
                         predicted.z = p.z;
@@ -550,7 +401,6 @@
                         predicted.coyoteTimer = p.coyoteTimer || 0;
                         predicted.jumpBufferTimer = p.jumpBufferTimer || 0;
 
-                        // 아직 서버가 처리 못한 입력들을 그 위에 다시 재생
                         for (const entry of inputHistory) {
                             stepPlayer(predicted, entry.input, FIXED_DT);
                         }
@@ -558,18 +408,10 @@
 
                     player.yaw = yaw;
 
-                    document.getElementById("hp").textContent =
-                        `HP: ${p.hp}`;
-
-                    document.getElementById("score").textContent =
-                        `K: ${p.kills} / D: ${p.deaths}`;
+                    document.getElementById("hp").textContent = `HP: ${p.hp}`;
+                    document.getElementById("score").textContent = `K: ${p.kills} / D: ${p.deaths}`;
 
                 } else {
-
-                    // ------------------------------------------------
-                    // 다른 플레이어: 위치를 바로 스냅하지 않고
-                    // target에 저장해서 매 프레임 부드럽게 따라가게 한다.
-                    // ------------------------------------------------
                     player.target.x = p.x;
                     player.target.y = p.y;
                     player.target.z = p.z;
@@ -577,16 +419,10 @@
                 }
             }
 
-
-            // 나간 플레이어 삭제
+            // 퇴장 플레이어 삭제
             for (const [id, player] of players) {
-
                 if (!alive.has(id)) {
-
-                    GEO.remove(
-                        player.mesh
-                    );
-
+                    GEO.remove(player.mesh);
                     players.delete(id);
                 }
             }
@@ -594,7 +430,7 @@
 
 
         // ============================================================
-        // 다른 플레이어 위치 보간 + 내 캐릭터 예측 이동/렌더링 (매 프레임)
+        // 프레임 업데이트 / 보간 처리
         // ============================================================
 
         function updateLocalPrediction(dt) {
@@ -602,8 +438,6 @@
             if (!predicted) return;
 
             accumulator += dt;
-
-            // 프레임이 크게 끊겨도 한 번에 너무 많은 스텝을 몰아서 밟지 않도록 상한
             accumulator = Math.min(accumulator, FIXED_DT * 5);
 
             while (accumulator >= FIXED_DT) {
@@ -633,7 +467,6 @@
             me.mesh.rotation.y = yaw;
             me.yaw = yaw;
 
-            // 3인칭 카메라 (예측 위치를 즉시 따라가서 지연 없음)
             const distance = 8;
 
             const camX = predicted.x - Math.sin(yaw) * distance;
@@ -667,25 +500,16 @@
 
         function updateLeaderboard(list) {
 
-            const element =
-                document.getElementById("scores");
-
+            const element = document.getElementById("scores");
             element.innerHTML = "";
 
             for (let i = 0; i < list.length; i++) {
 
                 const p = list[i];
+                const row = document.createElement("div");
 
-                const row =
-                    document.createElement("div");
-
-                const name =
-                    p.id === myId
-                        ? `${p.id} (YOU)`
-                        : p.id;
-
-                row.textContent =
-                    `${i + 1}. ${name} — ${p.kills} K`;
+                const name = p.id === myId ? `${p.id} (YOU)` : p.id;
+                row.textContent = `${i + 1}. ${name} — ${p.kills} K`;
 
                 element.appendChild(row);
             }
@@ -701,10 +525,6 @@
             updateLocalPrediction(dt);
 
             updateRemoteInterpolation(dt);
-
-            updateShooting();
-
-            updateBullets();
 
         });
 
