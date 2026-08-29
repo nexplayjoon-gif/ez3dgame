@@ -55,6 +55,19 @@ function createBot(index) {
         ws.on('open', () => {
             console.log(`[bot ${index}] 서버에 접속함`);
             randomizeDirection();
+
+            sendTimer = setInterval(() => {
+                if (ws.readyState !== WebSocket.OPEN) return;
+
+                ws.send(JSON.stringify({
+                    type: 'input',
+                    moveX: 1,
+                    moveZ: 0,
+                    jump: false,
+                    shoot: false,
+                    yaw: 0
+                }));
+            }, 1000 / 60);
         });
 
         ws.on('message', (raw) => {
