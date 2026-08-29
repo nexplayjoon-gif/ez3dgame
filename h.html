@@ -145,6 +145,15 @@
 
 
         // ============================================================
+        // 총알 상수
+        // ============================================================
+
+        const BULLET_SPEED = 45;
+        const SHOOT_COOLDOWN = 0.08;
+        let lastShootTime = 0;
+
+
+        // ============================================================
         // WebSocket
         // ============================================================
 
@@ -163,13 +172,19 @@
         const FIXED_DT = 1 / 60;
         let accumulator = 0;
 
+        // 로컬 총알 (내가 쏜 것)
+        const localBullets = [];
+        let localBulletId = 0;
+
+        // 서버 총알 (상대방이 쏜 것)
+        const bulletMeshMap = new Map();
+
 
         // ============================================================
         // 플레이어
         // ============================================================
 
         function createPlayer(id) {
-            // 내 캐릭터면 파란색(0x3388ff), 상대방이면 빨간색(0xff3333)
             const color = (id === myId) ? 0x3388ff : 0xff3333;
 
             const mesh = GEO.make(
@@ -193,13 +208,55 @@
 
 
         // ============================================================
-        // ✨ 총알 관리 (요청하신 bulletMeshMap 연동 로직)
+        // ✨ 총알 발사 (클라이언트 즉시 생성)
         // ============================================================
 
-        const bulletMeshMap = new Map(); // 총알 ID별 3D 오브젝트 저장소
+        function shootBullet() {
+            const now = performance.now() / 1000;
+            if (now - lastShootTime < SHOOT_COOLDOWN) return;
+            lastShootTime = now;
+
+            if (!predicted) return;
+
+            const id = 'local_' + (localBulletId++);
+            const mesh = GEO.make('sphere', predicted.x, predicted.y + 0.3, predicted.z, false, 0x3388ff);
+            mesh.scale.set(0.2, 0.2, 0.2);
+
+            localBullets.push({
+                id,
+                mesh,
+                x: predicted.x,
+                y: predicted.y + 0.3,
+                z: predicted.z,
+                yaw: yaw,
+                life: 1.0
+            });
+        }
+
 
         // ============================================================
-        // 서버 총알 동기화 (상대방 총알만 동기화)
+        // ✨ 로컬 총알 업데이트 (매 프레임)
+        // ============================================================
+
+        function updateLocalBullets(dt) {
+            for (let i = localBullets.length - 1; i >= 0; i--) {
+                const b = localBullets[i];
+                b.x += Math.sin(b.yaw) * BULLET_SPEED * dt;
+                b.z += Math.cos(b.yaw) * BULLET_SPEED * dt;
+                b.life -= dt;
+
+                b.mesh.position.set(b.x, b.y, b.z);
+
+                if (b.life <= 0 || Math.abs(b.x) > 20 || Math.abs(b.z) > 20) {
+                    GEO.remove(b.mesh);
+                    localBullets.splice(i, 1);
+                }
+            }
+        }
+
+
+        // ============================================================
+        // ✨ 서버 총알 동기화 (상대방 총알만)
         // ============================================================
 
         function updateServerBullets(serverBullets) {
@@ -208,7 +265,7 @@
             const activeIds = new Set();
 
             serverBullets.forEach(b => {
-                // 내 총알은 이미 화면에 즉시 그려졌으므로, 상대방 총알만 처리합니다.
+                // 내 총알은 로컬에서 이미 처리했으므로 무시
                 if (b.ownerId === myId) return;
 
                 activeIds.add(b.id);
@@ -224,9 +281,9 @@
                 }
             });
 
-            // 서버 목록에서 사라진 상대방 총알 제거 (로컬 임시 총알은 제외)
+            // 서버 목록에서 사라진 상대방 총알 제거
             for (const [id, mesh] of bulletMeshMap.entries()) {
-                if (!id.startsWith("local_") && !activeIds.has(id)) {
+                if (!activeIds.has(id)) {
                     GEO.remove(mesh);
                     bulletMeshMap.delete(id);
                 }
@@ -246,7 +303,6 @@
         });
 
         document.addEventListener("mousemove", e => {
-
             if (document.pointerLockElement !== document.body) {
                 return;
             }
@@ -268,11 +324,9 @@
         let jumpRequested = false;
 
         window.addEventListener("keydown", e => {
-
             if (e.code === "Space") {
                 jumpRequested = true;
             }
-
         });
 
         function computeInput() {
@@ -307,6 +361,11 @@
                 yaw
             };
 
+            // 클라이언트 즉시 발사 (서버에도 전송되지만, 여기서 미리 생성)
+            if (input.shoot) {
+                shootBullet();
+            }
+
             jumpRequested = false;
 
             return input;
@@ -338,7 +397,6 @@
         });
 
         socket.addEventListener("message", event => {
-
             const data = JSON.parse(event.data);
 
             if (data.type === "welcome") {
@@ -350,7 +408,7 @@
                 // 1. 플레이어 동기화
                 updatePlayers(data.players);
 
-                // 2. ✨ 총알 렌더링 동기화
+                // 2. ✨ 총알 렌더링 동기화 (상대방 총알만)
                 updateServerBullets(data.bullets);
 
                 return;
@@ -368,11 +426,9 @@
         // ============================================================
 
         function updatePlayers(list) {
-
             const alive = new Set();
 
             for (const p of list) {
-
                 alive.add(p.id);
 
                 let player = players.get(p.id);
@@ -383,7 +439,6 @@
                 }
 
                 if (p.id === myId) {
-
                     if (!predicted) {
                         predicted = {
                             x: p.x,
@@ -394,9 +449,7 @@
                             coyoteTimer: p.coyoteTimer || 0,
                             jumpBufferTimer: p.jumpBufferTimer || 0
                         };
-
                     } else if (typeof p.lastProcessedSeq === 'number') {
-
                         inputHistory = inputHistory.filter(
                             entry => entry.seq > p.lastProcessedSeq
                         );
@@ -418,7 +471,6 @@
 
                     document.getElementById("hp").textContent = `HP: ${p.hp}`;
                     document.getElementById("score").textContent = `K: ${p.kills} / D: ${p.deaths}`;
-
                 } else {
                     player.target.x = p.x;
                     player.target.y = p.y;
@@ -442,14 +494,12 @@
         // ============================================================
 
         function updateLocalPrediction(dt) {
-
             if (!predicted) return;
 
             accumulator += dt;
             accumulator = Math.min(accumulator, FIXED_DT * 5);
 
             while (accumulator >= FIXED_DT) {
-
                 const input = computeInput();
                 inputSeq++;
 
@@ -463,7 +513,6 @@
             }
 
             const me = players.get(myId);
-
             if (!me) return;
 
             me.mesh.position.set(
@@ -486,11 +535,9 @@
         }
 
         function updateRemoteInterpolation(dt) {
-
             const lerpFactor = Math.min(1, dt * 12);
 
             for (const [id, player] of players) {
-
                 if (id === myId) continue;
 
                 player.mesh.position.x += (player.target.x - player.mesh.position.x) * lerpFactor;
@@ -507,12 +554,10 @@
         // ============================================================
 
         function updateLeaderboard(list) {
-
             const element = document.getElementById("scores");
             element.innerHTML = "";
 
             for (let i = 0; i < list.length; i++) {
-
                 const p = list[i];
                 const row = document.createElement("div");
 
@@ -529,13 +574,9 @@
         // ============================================================
 
         WORLD.animate((dt) => {
-
             updateLocalPrediction(dt);
-
             updateRemoteInterpolation(dt);
-
-            updateShooting(); // 👈 이 구문이 들어있어야 프레임마다 연사를 감지합니다.
-
+            updateLocalBullets(dt);  // ← 로컬 총알 업데이트
         });
 
     </script>
