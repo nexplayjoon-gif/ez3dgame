@@ -110,7 +110,7 @@ function createBot(index) {
         // 이동 방향을 몇 초마다 랜덤하게 재선택
         behaviorTimers.push(setInterval(() => {
             randomizeDirection();
-        }, 1000 + Math.random() * 2500));
+        }, 1000 + Math.random() * 6000));
 
         // 시점(yaw)을 계속 조금씩 랜덤하게 회전 → 사격 방향도 같이 바뀜
         behaviorTimers.push(setInterval(() => {
