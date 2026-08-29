@@ -198,20 +198,25 @@
 
         const bulletMeshMap = new Map(); // 총알 ID별 3D 오브젝트 저장소
 
+        // ============================================================
+        // 서버 총알 동기화 (상대방 총알만 동기화)
+        // ============================================================
+
         function updateServerBullets(serverBullets) {
             if (!serverBullets) return;
 
             const activeIds = new Set();
 
             serverBullets.forEach(b => {
+                // 내 총알은 이미 화면에 즉시 그려졌으므로, 상대방 총알만 처리합니다.
+                if (b.ownerId === myId) return;
+
                 activeIds.add(b.id);
                 let mesh = bulletMeshMap.get(b.id);
 
                 if (!mesh) {
-                    // 총알 주인(ownerId)이 나면 노란색, 상대방이면 빨간색
-                    const bulletColor = (b.ownerId === myId) ? 0xffff00 : 0xff0000;
-
-                    mesh = GEO.make("sphere", b.x, b.y, b.z, false, bulletColor);
+                    // 상대방 총알 (빨간색)
+                    mesh = GEO.make("sphere", b.x, b.y, b.z, false, 0xff0000);
                     mesh.scale.set(0.2, 0.2, 0.2);
                     bulletMeshMap.set(b.id, mesh);
                 } else {
@@ -219,8 +224,9 @@
                 }
             });
 
+            // 서버 목록에서 사라진 상대방 총알 제거 (로컬 임시 총알은 제외)
             for (const [id, mesh] of bulletMeshMap.entries()) {
-                if (!activeIds.has(id)) {
+                if (!id.startsWith("local_") && !activeIds.has(id)) {
                     GEO.remove(mesh);
                     bulletMeshMap.delete(id);
                 }
@@ -527,6 +533,8 @@
             updateLocalPrediction(dt);
 
             updateRemoteInterpolation(dt);
+
+            updateShooting(); // 👈 이 구문이 들어있어야 프레임마다 연사를 감지합니다.
 
         });
 
