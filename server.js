@@ -5,7 +5,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { PHYSICS, stepPlayer } from './physics.js';
 
 const PORT = process.env.PORT || 3000;
-
+let nextBulletId = 1;
 // ============================================================
 // HTTP 정적 파일 서버 (h.html 및 ez3d.js 제공용)
 // ============================================================
@@ -69,11 +69,9 @@ const activeBullets = [];
 
 function createServerBullet(ownerId, x, y, z, yaw) {
     activeBullets.push({
+        id: nextBulletId++, // ✨ 고유 ID 부여
         ownerId,
-        x,
-        y,
-        z,
-        yaw,
+        x, y, z, yaw,
         life: 1.0
     });
 }
@@ -224,6 +222,7 @@ function broadcastState() {
         type: 'state',
         players: playerList,
         bullets: activeBullets.map(b => ({
+            id: b.id,       // ✨ ID 포함해서 전송
             ownerId: b.ownerId,
             x: b.x,
             y: b.y,
