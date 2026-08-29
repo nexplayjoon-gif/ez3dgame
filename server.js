@@ -61,7 +61,7 @@ function spawnPlayer(id) {
         deaths: 0,
         isGrounded: true,
         lastShootTime: 0,
-        input: { w: false, a: false, s: false, d: false, jump: false, shoot: false, yaw: 0 }
+        input: { moveX: 0, moveZ: 0, jump: false, shoot: false, yaw: 0 }
     };
 }
 
@@ -132,28 +132,13 @@ setInterval(() => {
     for (const [ws, p] of players) {
         p.yaw = p.input.yaw;
 
-        const moveX = p.input.moveX;
-        const moveZ = p.input.moveZ;
+        // 클라이언트가 이미 yaw 기준으로 회전시킨 월드좌표 이동값을 보내므로
+        // 여기서는 그대로 한 번만 적용한다 (다시 회전시키면 이중 적용됨).
+        const moveX = p.input.moveX || 0;
+        const moveZ = p.input.moveZ || 0;
 
         p.x += moveX * PLAYER_SPEED * DT;
         p.z += moveZ * PLAYER_SPEED * DT;
-
-        // 대각선 이동 속도 정규화
-        const len = Math.hypot(moveX, moveZ);
-        if (len > 0) {
-            moveX /= len;
-            moveZ /= len;
-
-            // Yaw 회전에 맞춘 이동 처리
-            const sin = Math.sin(p.yaw);
-            const cos = Math.cos(p.yaw);
-
-            const worldDX = moveX * cos - moveZ * sin;
-            const worldDZ = moveX * sin + moveZ * cos;
-
-            p.x += worldDX * PLAYER_SPEED * DT;
-            p.z += worldDZ * PLAYER_SPEED * DT;
-        }
 
         // 필드 경계 제한
         p.x = Math.max(-FIELD_BOUNDS, Math.min(FIELD_BOUNDS, p.x));

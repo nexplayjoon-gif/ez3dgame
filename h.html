@@ -263,6 +263,10 @@
         });
 
         function sendInput() {
+            if (socket.readyState !== WebSocket.OPEN) {
+                jumpRequested = false;
+                return;
+            }
 
             let inputX = 0;
             let inputZ = 0;
@@ -279,7 +283,6 @@
                 inputZ /= length;
             }
 
-            // 플레이어가 바라보는 방향을 기준으로 회전
             const moveX =
                 inputX * Math.cos(yaw) -
                 inputZ * Math.sin(yaw);
@@ -290,13 +293,11 @@
 
             socket.send(JSON.stringify({
                 type: "input",
-
-                moveX: moveX,
-                moveZ: moveZ,
-
+                moveX,
+                moveZ,
                 jump: jumpRequested,
                 shoot: INPUT.isDown("KeyE"),
-                yaw: yaw
+                yaw
             }));
 
             jumpRequested = false;
