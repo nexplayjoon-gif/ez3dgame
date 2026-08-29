@@ -282,14 +282,13 @@
                 inputX /= length;
                 inputZ /= length;
             }
-
             const moveX =
-                inputX * Math.cos(yaw) -
-                inputZ * Math.sin(yaw);
+                inputZ * Math.sin(yaw) -
+                inputX * Math.cos(yaw);
 
             const moveZ =
-                inputX * Math.sin(yaw) +
-                inputZ * Math.cos(yaw);
+                inputZ * Math.cos(yaw) +
+                inputX * Math.sin(yaw);
 
             socket.send(JSON.stringify({
                 type: "input",
