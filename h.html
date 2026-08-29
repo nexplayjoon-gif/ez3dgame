@@ -121,16 +121,36 @@
         // 맵
         // ============================================================
 
-        const ground = GEO.make(
-            "ground",
-            0,
-            0,
-            0,
-            false,
-            0x555555
-        );
+        const TILE_SIZE = 2;
+        const MAP_SIZE = 40;
 
-        ground.scale.set(20, 20, 20);
+        for (let x = -MAP_SIZE / 2; x < MAP_SIZE / 2; x += TILE_SIZE) {
+            for (let z = -MAP_SIZE / 2; z < MAP_SIZE / 2; z += TILE_SIZE) {
+
+                const tileX = x + TILE_SIZE / 2;
+                const tileZ = z + TILE_SIZE / 2;
+
+                const color =
+                    ((Math.floor(x / TILE_SIZE) + Math.floor(z / TILE_SIZE)) % 2 === 0)
+                        ? 0x444444
+                        : 0x777777;
+
+                const tile = GEO.make(
+                    "ground",
+                    tileX,
+                    0,
+                    tileZ,
+                    false,
+                    color
+                );
+
+                tile.scale.set(
+                    TILE_SIZE / 20,
+                    TILE_SIZE / 20,
+                    TILE_SIZE / 20
+                );
+            }
+        }
 
         // 조명
         LIGHT.ambient(0.5);
